@@ -2,12 +2,14 @@
 #include <relinker/pipeline/Conversion.hpp>
 #include <relinker/analysis/SyscallScanner.hpp>
 #include <relinker/analysis/CodeInstructionCollector.hpp>
+#include <relinker/analysis/UnusedNidFilter/IEntryPointCollector.hpp>
 #include <io/BufferUtils.hpp>
 #include <io/NativePath.hpp>
 #include <codegen/IAmd64OnlyConverter.hpp>
 #include <algorithm>
 #include <array>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 namespace {
@@ -174,6 +176,60 @@ void scanning() {
     });
     require(instructions.size() == code.size(), "Progress changed image code analysis");
     require(updates > 10 && previous == 10000, "Missing intermediate image analysis progress");
+
+    auto overflowElf = fixture();
+    const auto overflowHeader = 64 + 3 * 56;
+    Io::WriteU32(overflowElf, overflowHeader, 1);
+    Io::WriteU32(overflowElf, overflowHeader + 4, 0);
+    Io::WriteU64(overflowElf, overflowHeader + 8, std::numeric_limits<std::uint64_t>::max() - 0x40);
+    Io::WriteU64(overflowElf, overflowHeader + 16, 0x4000);
+    Io::WriteU64(overflowElf, overflowHeader + 24, 0x4000);
+    Io::WriteU64(overflowElf, overflowHeader + 32, 0x410);
+    Io::WriteU64(overflowElf, overflowHeader + 40, 0x410);
+    Io::WriteU64(overflowElf, overflowHeader + 48, 1);
+    const auto dynamicHeader = 64 + 2 * 56;
+    Io::WriteU64(overflowElf, dynamicHeader + 32, 10 * 16);
+    Io::WriteU64(overflowElf, dynamicHeader + 40, 10 * 16);
+    Io::WriteU64(overflowElf, 0x2000 + 7 * 16, 25);
+    Io::WriteU64(overflowElf, 0x2000 + 7 * 16 + 8, 0x4400);
+    Io::WriteU64(overflowElf, 0x2000 + 8 * 16, 27);
+    Io::WriteU64(overflowElf, 0x2000 + 8 * 16 + 8, 8);
+    Io::WriteU64(overflowElf, 0x2000 + 9 * 16, 0);
+    Io::WriteU64(overflowElf, 0x2000 + 9 * 16 + 8, 0);
+    class EmptyRelocations final : public Relinker::UnusedNidFilter::IRelativeRelocationIndex {
+    public:
+        std::optional<Relinker::VirtualAddress> TargetOfSlot(Relinker::VirtualAddress) const override { return std::nullopt; }
+        std::vector<Relinker::VirtualAddress> Targets() const override { return {}; }
+    } emptyRelocations;
+    reject([&] { Relinker::UnusedNidFilter::MakeEntryPointCollector()->Collect(overflowElf, 0x1000, 8, emptyRelocations); });
+
+    std::vector<std::uint8_t> overflowAnalysis(0x3000, 0);
+    Io::WriteU64(overflowAnalysis, 24, 64);
+    Io::WriteU64(overflowAnalysis, 0x100, 25);
+    Io::WriteU64(overflowAnalysis, 0x108, 0x4400);
+    Io::WriteU64(overflowAnalysis, 0x110, 27);
+    Io::WriteU64(overflowAnalysis, 0x118, 8);
+    Io::WriteU64(overflowAnalysis, 0x120, 0);
+    Io::WriteU64(overflowAnalysis, 0x128, 0);
+    Domain::ProgramHeader analysisCode{};
+    analysisCode.Type = 1;
+    analysisCode.Flags = 5;
+    analysisCode.FileSize = 0x100;
+    analysisCode.MemorySize = 0x100;
+    Domain::ProgramHeader analysisDynamic{};
+    analysisDynamic.Type = 2;
+    analysisDynamic.Offset = 0x100;
+    analysisDynamic.MappedAddress = 0x100;
+    analysisDynamic.FileSize = 48;
+    analysisDynamic.MemorySize = 48;
+    Domain::ProgramHeader analysisOverflow{};
+    analysisOverflow.Type = 1;
+    analysisOverflow.Offset = std::numeric_limits<std::uint64_t>::max() - 0x40;
+    analysisOverflow.MappedAddress = 0x4000;
+    analysisOverflow.FileSize = 0x410;
+    analysisOverflow.MemorySize = 0x410;
+    reject([&] { Relinker::CodeInstructionCollector().Collect(overflowAnalysis, {analysisCode, analysisDynamic, analysisOverflow}); });
+
     code[70000] = 0x0f;
     code[70001] = 0x05;
     progress.Events.clear();
