@@ -375,7 +375,10 @@ void FrameRecorder::writeDelta(std::span<const Span> spans, std::span<const std:
         }
         for (std::uint64_t at = 0; at < range.bytes;) {
             bytes.resize(static_cast<std::size_t>(std::min<std::uint64_t>(FrameCaptureWriter::BlockBytes, range.bytes - at)));
-            GuestMemory::ReadCommittedUnsynced(range.address + at, bytes);
+            // Delta ranges can contain GPU writes from submissions that are still in flight. A
+            // capture must wait for those writes before copying the bytes, or replay can restore a
+            // stale pre-DMA value over the completed submission.
+            GuestMemory::ReadCommitted(range.address + at, bytes);
             const bool zero = std::all_of(bytes.begin(), bytes.end(), [](std::byte value) { return value == std::byte{0}; });
             if (!zero) {
                 writer->WriteDelta(group, completed, range.address + at, bytes);
@@ -401,7 +404,9 @@ void FrameRecorder::writeDelta(std::span<const Span> spans, std::span<const std:
         GuestMemory::CollectWrittenBlocks(span.address, static_cast<std::size_t>(span.bytes), span.since, written);
         for (const auto& [begin, end] : written) {
             bytes.resize(static_cast<std::size_t>(end - begin));
-            GuestMemory::ReadCommittedUnsynced(begin, bytes);
+            // The write-generation scan does not synchronize the GPU. Use the committed read path
+            // so a delta never records a block while its last GPU write is still in flight.
+            GuestMemory::ReadCommitted(begin, bytes);
             writer->WriteDelta(group, completed, begin, bytes);
             deltaBytes += bytes.size();
             any = true;
