@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: mashingaan/AnyPS5
-          ref: 9db21731464154448a5714a2493aac76a80186ec
+          ref: 6076b8591c4da031273e2103bf95cf7129225f7d
           submodules: recursive
           persist-credentials: false
       - name: Restore compiler
