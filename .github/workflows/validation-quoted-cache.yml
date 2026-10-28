@@ -1,0 +1,37 @@
+name: Validate quoted CMake cache values
+on:
+  push:
+    branches:
+      - validation/cmake-quoted-value
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure a real CMake cache and check the parser
+        shell: bash
+        run: |
+          python - <<'PY'
+          import subprocess
+          import tempfile
+          from pathlib import Path
+          from tools.configure_seed import checks
+
+          with tempfile.TemporaryDirectory() as directory:
+              root = Path(directory)
+              source = root / 'source'
+              source.mkdir()
+              content = 'cmake_minimum_required(VERSION 3.20)\nproject(cache_probe NONE)\nset("A:B" [=[abc":INTERNAL=1]=] CACHE INTERNAL "Test cache probe")\n'
+              (source / 'CMakeLists.txt').write_text(content, encoding='utf-8')
+              subprocess.run(['cmake', '-S', str(source), '-B', str(root / 'build')], check=True)
+              cache = root / 'build' / 'CMakeCache.txt'
+              print('cache entries:', [line for line in cache.read_text().splitlines() if 'A:B' in line])
+              result = checks(cache)
+              print('parsed:', result)
+              expected = {'A:B': ('abc":INTERNAL=1', 'Test cache probe')}
+              if result != expected:
+                  raise SystemExit('quoted cache value was parsed incorrectly')
+          PY
