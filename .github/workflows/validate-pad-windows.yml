@@ -1,0 +1,41 @@
+name: Validate pad on Windows
+on:
+  push:
+    branches:
+      - validation/cmake-quoted-value
+    paths:
+      - .github/workflows/validate-pad-windows.yml
+permissions:
+  contents: read
+jobs:
+  pad:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: mashingaan/AnyPS5
+          ref: 9db21731464154448a5714a2493aac76a80186ec
+          submodules: recursive
+          persist-credentials: false
+      - name: Restore compiler
+        id: compiler
+        uses: actions/cache@v6
+        with:
+          path: C:\winlibs
+          key: winlibs-x86_64-posix-seh-gcc-15.2.0-mingw-w64ucrt-14.0.0-r7.zip
+      - name: Download compiler when needed
+        if: steps.compiler.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri 'https://github.com/brechtsanders/winlibs_mingw/releases/download/15.2.0posix-14.0.0-ucrt-r7/winlibs-x86_64-posix-seh-gcc-15.2.0-mingw-w64ucrt-14.0.0-r7.zip' -OutFile "$env:RUNNER_TEMP\winlibs.zip"
+          7z x "$env:RUNNER_TEMP\winlibs.zip" -oC:/winlibs
+      - name: Set compiler path
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value 'C:\winlibs\mingw64\bin'
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+      - name: Build pad test
+        run: cmake --build build --target guest_pad_tests --parallel 4
+      - name: Run pad test
+        run: ctest --test-dir build -R '^guest_pad$' --no-tests=error --output-on-failure --timeout 120
