@@ -39,4 +39,11 @@ jobs:
               if lines[0] != lines[1]:
                   raise SystemExit('the two cache entries are distinguishable')
               print('CMake serialized two distinct name and value pairs identically')
+              for label, name, value in cases:
+                  cache = root / (label + '-build') / 'CMakeCache.txt'
+                  if checks(cache):
+                      raise SystemExit('ambiguous cache entry was not skipped')
+              print('Both ambiguous cache entries were skipped')
           PY
+      - name: Run existing configure seed tests
+        run: python -m unittest tools.tests.test_configure_seed

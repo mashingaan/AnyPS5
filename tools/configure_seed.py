@@ -15,7 +15,11 @@ def checks(cache):
         if line.startswith("//"):
             doc.append(line)
             continue
-        match = QUOTED_ENTRY.match(line) or ENTRY.match(line)
+        match = QUOTED_ENTRY.match(line)
+        if match and len(re.findall(r'":([A-Z]+)=', line)) != 1:
+            match = None
+        elif not match:
+            match = ENTRY.match(line)
         if match and match.group(2) == "INTERNAL" and doc and CHECK.match(doc[0]):
             help_text = "".join("\n" + line[4:] if line.startswith("//\\n") else line[2:] for line in doc)
             found[match.group(1)] = (match.group(3), help_text)
