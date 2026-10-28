@@ -3,7 +3,6 @@ on:
   push:
     branches:
       - validation/cmake-quoted-value
-  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -11,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Configure a real CMake cache and check the parser
+      - name: Compare two real CMake caches
         shell: bash
         run: |
           python - <<'PY'
@@ -20,18 +19,24 @@ jobs:
           from pathlib import Path
           from tools.configure_seed import checks
 
+          cases = [
+              ('first', 'A:B', 'abc":INTERNAL=1'),
+              ('second', 'A:B":INTERNAL=abc', '1'),
+          ]
           with tempfile.TemporaryDirectory() as directory:
               root = Path(directory)
-              source = root / 'source'
-              source.mkdir()
-              content = 'cmake_minimum_required(VERSION 3.20)\nproject(cache_probe NONE)\nset("A:B" [=[abc":INTERNAL=1]=] CACHE INTERNAL "Test cache probe")\n'
-              (source / 'CMakeLists.txt').write_text(content, encoding='utf-8')
-              subprocess.run(['cmake', '-S', str(source), '-B', str(root / 'build')], check=True)
-              cache = root / 'build' / 'CMakeCache.txt'
-              print('cache entries:', [line for line in cache.read_text().splitlines() if 'A:B' in line])
-              result = checks(cache)
-              print('parsed:', result)
-              expected = {'A:B': ('abc":INTERNAL=1', 'Test cache probe')}
-              if result != expected:
-                  raise SystemExit('quoted cache value was parsed incorrectly')
+              lines = []
+              for label, name, value in cases:
+                  source = root / label
+                  source.mkdir()
+                  content = f'cmake_minimum_required(VERSION 3.20)\nproject(cache_probe NONE)\nset([=[{name}]=] [=[{value}]=] CACHE INTERNAL "Test cache probe")\n'
+                  (source / 'CMakeLists.txt').write_text(content, encoding='utf-8')
+                  subprocess.run(['cmake', '-S', str(source), '-B', str(root / (label + '-build'))], check=True)
+                  cache = root / (label + '-build') / 'CMakeCache.txt'
+                  entry = next(line for line in cache.read_text().splitlines() if line.startswith('"A:B'))
+                  print(label, 'input:', repr((name, value)), 'serialized:', repr(entry), 'parsed:', checks(cache))
+                  lines.append(entry)
+              if lines[0] != lines[1]:
+                  raise SystemExit('the two cache entries are distinguishable')
+              print('CMake serialized two distinct name and value pairs identically')
           PY
