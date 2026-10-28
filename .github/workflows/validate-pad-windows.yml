@@ -33,6 +33,12 @@ jobs:
       - name: Set compiler path
         shell: pwsh
         run: Add-Content -Path $env:GITHUB_PATH -Value 'C:\winlibs\mingw64\bin'
+      - name: Set Git CA bundle
+        shell: pwsh
+        run: |
+          $bundle = @('C:/Program Files/Git/ucrt64/etc/ssl/certs/ca-bundle.crt', 'C:/Program Files/Git/mingw64/etc/ssl/certs/ca-bundle.crt') | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $bundle) { throw 'Git CA bundle is unavailable' }
+          Add-Content -Path $env:GITHUB_ENV -Value "SSL_CERT_FILE=$bundle"
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
       - name: Build pad test
